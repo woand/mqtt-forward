@@ -17,18 +17,13 @@
 #include <mosquitto.h>
 #include <getopt.h>
 #include <poll.h>
+#include "log.h"
 #include "utils.h"
 #include "protocol.h"
 #include "session.h"
 #include "beacon.h"
 
 #define TX_WINDOW_LIMIT 100
-
-#define DBG_LOG_(fmt, ...) \
-	do { \
-		if (debug) \
-			printf(fmt, __VA_ARGS__); \
-	} while (0)
 
 #define ENV_VAR_MQTT_HOST   "MQTT_FORWARD_MQTT_HOST"
 #define ENV_VAR_ROOT_CA     "MQTT_FORWARD_ROOT_CA"
@@ -42,7 +37,6 @@
 /**
  * Global variables
  */
-static bool debug;
 static int tcp_client_listen_sock;
 static int tcp_client_listen_port;
 static int tcp_server_connect_port;
@@ -170,7 +164,7 @@ static void *tcp_session_rx_thread_fn(void *arg)
 				retransmit_tx_hdr->flags = 0;
 			}
 
-			DBG_LOG_("Session %s: TX RETRANSMIT: %4lu. Acked %4lu\n",
+			LOG(LOG_DEBUG, "Session %s: TX RETRANSMIT: %4lu. Acked %4lu\n",
 				 session_data->session_id,
 				 retransmit_tx_hdr->seq_nbr,
 				 retransmit_tx_hdr->acked_seq_nbr);
@@ -189,7 +183,7 @@ static void *tcp_session_rx_thread_fn(void *arg)
 			pthread_mutex_unlock(&session_mtx);
 			ret = poll(&fds, 1, 500);
 			if (ret < 0) {
-				fprintf(stderr, "%s: poll errno: %d\n", __func__, errno);
+				LOG(LOG_INFO, "%s: poll errno: %d\n", __func__, errno);
 				break;
 			} else if (ret == 0) {
 				/* Timeout */
@@ -214,7 +208,7 @@ static void *tcp_session_rx_thread_fn(void *arg)
 					cfg_hdr_buf = NULL;
 					cfg_hdr_size = 0;
 				}
-				DBG_LOG_("Session %s: TX HEARTBEAT: %4lu. Acked %4lu\n",
+				LOG(LOG_DEBUG, "Session %s: TX HEARTBEAT: %4lu. Acked %4lu\n",
 					 session_data->session_id,
 					 tx_hdr.seq_nbr,
 					 tx_hdr.acked_seq_nbr);
@@ -227,7 +221,7 @@ static void *tcp_session_rx_thread_fn(void *arg)
 							false /*retain*/);
 				if (ret) {
 
-					fprintf(stderr, "Publishing on topic %s failed. Result %d\n",
+					LOG(LOG_INFO, "Publishing on topic %s failed. Result %d\n",
 						topic,
 						ret);
 					break;
@@ -241,10 +235,10 @@ static void *tcp_session_rx_thread_fn(void *arg)
 					SESSION_RX_BUF_SIZE - sizeof(tx_hdr) - cfg_hdr_size,
 					0);
 			if (recv_len < 0) {
-				fprintf(stderr, "%s: recv errno: %d\n", __func__, errno);
+				LOG(LOG_INFO, "%s: recv errno: %d\n", __func__, errno);
 				break;
 			} else if (recv_len == 0) {
-				fprintf(stderr, "%s: TCP connection terminated\n", __func__);
+				LOG(LOG_INFO, "%s: TCP connection terminated\n", __func__);
 				break;
 			}
 
@@ -277,7 +271,7 @@ static void *tcp_session_rx_thread_fn(void *arg)
 			backlog_write_idx =
 				(tx_backlog->first_unacked_idx + backlog_offset) % SESSION_BACKLOG_SIZE;
 			if (tx_backlog->backlog[backlog_write_idx].buf) {
-				fprintf(stderr, "Session: %s: Backlog index %d already has an allocated buffer!\n",
+				LOG(LOG_INFO, "Session: %s: Backlog index %d already has an allocated buffer!\n",
 					session_data->session_id,
 					backlog_write_idx);
 				free(tx_backlog->backlog[backlog_write_idx].buf);
@@ -286,7 +280,7 @@ static void *tcp_session_rx_thread_fn(void *arg)
 			tx_backlog->backlog[backlog_write_idx].len = recv_len;
 			memcpy(tx_backlog->backlog[backlog_write_idx].buf, rx_buf, recv_len);
 			session_data->tx_seq_nbr++;
-			DBG_LOG_("Session %s: TX: %4lu. Acked %4lu\n",
+			LOG(LOG_DEBUG, "Session %s: TX: %4lu. Acked %4lu\n",
 				 session_data->session_id,
 				 tx_hdr.seq_nbr,
 				 tx_hdr.acked_seq_nbr);
@@ -300,7 +294,7 @@ static void *tcp_session_rx_thread_fn(void *arg)
 						false /*retain*/);
 			if (ret) {
 
-				fprintf(stderr, "Publishing on topic %s failed. Result %d\n",
+				LOG(LOG_INFO, "Publishing on topic %s failed. Result %d\n",
 					topic,
 					ret);
 				break;
@@ -308,7 +302,7 @@ static void *tcp_session_rx_thread_fn(void *arg)
 		}
 	}
 out:
-	fprintf(stderr, "%s: TCP session ended\n", __func__);
+	LOG(LOG_INFO, "%s: TCP session ended\n", __func__);
 
 	clear_session(session_data);
 
@@ -332,10 +326,10 @@ static void *tcp_accept_thread_fn(void *arg)
 		client_sock = accept(tcp_client_listen_sock,
 				     (struct sockaddr *)&client_addr,
 				     &addr_len);
-		fprintf(stderr, "%s: Accepted TCP connection\n", __func__);
+		LOG(LOG_INFO, "%s: Accepted TCP connection\n", __func__);
 
 		if (client_sock < 0) {
-			fprintf(stderr, "connect to remote server failed. errno %d\n", errno);
+			LOG(LOG_INFO, "connect to remote server failed. errno %d\n", errno);
 			close(client_sock);
 			continue;
 		}
@@ -344,7 +338,7 @@ static void *tcp_accept_thread_fn(void *arg)
 		if (remote_tcp_port_set || remote_tcp_server_addr_set) {
 			session_cfg = calloc(1, sizeof(*session_cfg));
 			if (!session_cfg) {
-				fprintf(stderr, "%s: Unable to allocate session config\n",
+				LOG(LOG_INFO, "%s: Unable to allocate session config\n",
 					__func__);
 				close(client_sock);
 				continue;
@@ -370,7 +364,7 @@ static void *tcp_accept_thread_fn(void *arg)
 				     tcp_session_rx_thread_fn);
 		pthread_mutex_unlock(&session_mtx);
 		if (ret < 0) {
-			fprintf(stderr, "%s: Unable to create client session\n", __func__);
+			LOG(LOG_INFO, "%s: Unable to create client session\n", __func__);
 			free(session_cfg);
 			close(client_sock);
 			continue;
@@ -404,11 +398,11 @@ static void *create_thread_fn(void *arg)
 					      20);
 
 		if (ret != MOSQ_ERR_SUCCESS) {
-			fprintf(stderr, "%s: mosquitto_connect_async %d\n",
+			LOG(LOG_INFO, "%s: mosquitto_connect_async %d\n",
 				  __func__, ret);
 
 			/* Try again */
-			fprintf(stderr, "%s: Unable to connect to %s. Retrying in %ld sec\n",
+			LOG(LOG_INFO, "%s: Unable to connect to %s. Retrying in %ld sec\n",
 				  __func__, mqtt_host, ts.tv_sec);
 		}
 
@@ -542,7 +536,7 @@ static void handle_mqtt_message(uint8_t *msg,
 	struct tcp_session_config *session_cfg = NULL;
 
 	if (msg_len < (int)sizeof(*rx_hdr)) {
-		fprintf(stderr, "%s: MQTT payload too short: %d\n",
+		LOG(LOG_INFO, "%s: MQTT payload too short: %d\n",
 			__func__, msg_len);
 		return;
 	}
@@ -579,7 +573,7 @@ static void handle_mqtt_message(uint8_t *msg,
 		 */
 		for (i = 0; i < num_old_sessions; i++) {
 			if (sized_str_eq(old_session_ids[i], session_id, session_id_len)) {
-				fprintf(stderr, "%s: Session ID %s is an old session. Message discarded\n",
+				LOG(LOG_INFO, "%s: Session ID %s is an old session. Message discarded\n",
 					__func__, old_session_ids[i]);
 				return;
 			}
@@ -587,7 +581,7 @@ static void handle_mqtt_message(uint8_t *msg,
 
 		if (rx_hdr->flags & TCP_OVER_MQTT_FLAG_REMOTE_CONFIG) {
 			if (msg_len < (int)(sizeof(*rx_hdr) + sizeof(*remote_cfg))) {
-				fprintf(stderr, "%s: Remote config header too short\n", __func__);
+				LOG(LOG_INFO, "%s: Remote config header too short\n", __func__);
 				return;
 			}
 
@@ -595,7 +589,7 @@ static void handle_mqtt_message(uint8_t *msg,
 			remote_cfg_offset = remote_cfg->config_size;
 			if ((remote_cfg_offset < sizeof(*remote_cfg)) ||
 			    (remote_cfg_offset > (size_t)(msg_len - sizeof(*rx_hdr)))) {
-				fprintf(stderr, "%s: Invalid remote config size: %zu\n",
+				LOG(LOG_INFO, "%s: Invalid remote config size: %zu\n",
 					__func__, remote_cfg_offset);
 				return;
 			}
@@ -608,7 +602,7 @@ static void handle_mqtt_message(uint8_t *msg,
 						   remote_cfg_offset,
 						   session_cfg);
 			if (ret) {
-				fprintf(stderr, "%s: Invalid remote config data\n",
+				LOG(LOG_INFO, "%s: Invalid remote config data\n",
 					__func__);
 				free(session_cfg);
 				return;
@@ -646,12 +640,12 @@ static void handle_mqtt_message(uint8_t *msg,
 	tx_backlog = &tcp_sessions[session_nbr].tx_backlog;
 
 	if (rx_hdr->flags & TCP_OVER_MQTT_FLAG_ACKED_SEQ_NBR)
-		DBG_LOG_("Session %s: RX: %4lu. Remote acked %4lu\n",
+		LOG(LOG_DEBUG, "Session %s: RX: %4lu. Remote acked %4lu\n",
 			 tcp_sessions[session_nbr].session_id,
 			 rx_hdr->seq_nbr,
 			 rx_hdr->acked_seq_nbr);
 	else
-		DBG_LOG_("Session %s: RX: %4lu. No remote ack\n",
+		LOG(LOG_DEBUG, "Session %s: RX: %4lu. No remote ack\n",
 			 tcp_sessions[session_nbr].session_id,
 			 rx_hdr->seq_nbr);
 
@@ -671,7 +665,7 @@ static void handle_mqtt_message(uint8_t *msg,
 
 		for (i = tx_backlog->acked_seq_nbr; i < rx_hdr->acked_seq_nbr; i++) {
 			if (!tx_backlog->backlog[tx_backlog->first_unacked_idx].buf) {
-				fprintf(stderr, "%s: TX backlog index %d already free'd!\n",
+				LOG(LOG_INFO, "%s: TX backlog index %d already free'd!\n",
 					__func__, tx_backlog->first_unacked_idx);
 				continue;
 			}
@@ -690,7 +684,7 @@ static void handle_mqtt_message(uint8_t *msg,
 	pthread_mutex_unlock(&session_mtx);
 
 	if (rx_hdr->flags & TCP_OVER_MQTT_FLAG_NO_DATA) {
-		DBG_LOG_("Session %s: No data frame received\n",
+		LOG(LOG_DEBUG, "Session %s: No data frame received\n",
 			 tcp_sessions[session_nbr].session_id);
 		return;
 	}
@@ -710,14 +704,14 @@ static void handle_mqtt_message(uint8_t *msg,
 	backlog_offset = rx_hdr->seq_nbr - rx_backlog->expected_seq_nbr;
 
 	if (backlog_offset < 0) {
-		fprintf(stderr, "%s: backlog offset is negative! Corrupt input data?\n", __func__);
-		fprintf(stderr, "RX sequence number: %4lu\n",
+		LOG(LOG_INFO, "%s: backlog offset is negative! Corrupt input data?\n", __func__);
+		LOG(LOG_INFO, "RX sequence number: %4lu\n",
 			rx_hdr->seq_nbr);
 		return;
 	}
 
 	if (backlog_offset > SESSION_BACKLOG_SIZE - 2) {
-		fprintf(stderr, "%s: backlog exceeded\n", __func__);
+		LOG(LOG_INFO, "%s: backlog exceeded\n", __func__);
 		return;
 	}
 
@@ -725,7 +719,7 @@ static void handle_mqtt_message(uint8_t *msg,
 		(rx_backlog->read_idx + backlog_offset) % SESSION_BACKLOG_SIZE;
 
 	if (rx_backlog->backlog[backlog_write_idx].buf) {
-		fprintf(stderr, "%s: Backlog buffer write index %d taken. Freeing.\n",
+		LOG(LOG_INFO, "%s: Backlog buffer write index %d taken. Freeing.\n",
 			__func__, backlog_write_idx);
 		free(rx_backlog->backlog[backlog_write_idx].buf);
 	}
@@ -739,7 +733,7 @@ static void handle_mqtt_message(uint8_t *msg,
 			       rx_backlog->backlog[rx_backlog->read_idx].buf,
 			       rx_backlog->backlog[rx_backlog->read_idx].len);
 		if (ret < 0) {
-			fprintf(stderr, "%s: send failed. errno %d. Clearing session %s\n",
+			LOG(LOG_INFO, "%s: send failed. errno %d. Clearing session %s\n",
 				__func__, errno, tcp_sessions[session_nbr].session_id);
 			request_session_close(&tcp_sessions[session_nbr]);
 			return;
@@ -770,7 +764,7 @@ static void on_message(struct mosquitto *mosq,
 
 	client_id = strchr(message->topic, '/');
 	if (!client_id) {
-		fprintf(stderr, "%s: Unable to extract client_id from received topic: %s\n",
+		LOG(LOG_INFO, "%s: Unable to extract client_id from received topic: %s\n",
 			__func__, message->topic);
 		return;
 	}
@@ -778,7 +772,7 @@ static void on_message(struct mosquitto *mosq,
 
 	session_id = strchr(client_id, '/');
 	if (!session_id) {
-		fprintf(stderr, "%s: Unable to extract session_id from received topic: %s\n",
+		LOG(LOG_INFO, "%s: Unable to extract session_id from received topic: %s\n",
 			__func__, message->topic);
 		return;
 	}
@@ -788,7 +782,7 @@ static void on_message(struct mosquitto *mosq,
 
 	msg_name = strchr(session_id, '/');
 	if (!msg_name) {
-		fprintf(stderr, "%s: Unable to extract msg_name from received topic: %s\n",
+		LOG(LOG_INFO, "%s: Unable to extract msg_name from received topic: %s\n",
 			__func__, message->topic);
 		return;
 	}
@@ -798,7 +792,7 @@ static void on_message(struct mosquitto *mosq,
 
 	msg_name = strrchr(message->topic, '/');
 	if (!msg_name) {
-		fprintf(stderr, "Invalid message topic received: %s\n", message->topic);
+		LOG(LOG_INFO, "Invalid message topic received: %s\n", message->topic);
 		return;
 	}
 
@@ -814,7 +808,7 @@ static void on_message(struct mosquitto *mosq,
 				    client_id_len,
 				    server_mode);
 	} else {
-		fprintf(stderr, "%s: %s: unsupported topic: %s\n",
+		LOG(LOG_INFO, "%s: %s: unsupported topic: %s\n",
 			__func__,
 			server_mode ? "SERVER" : "CLIENT",
 			message->topic);
@@ -840,13 +834,13 @@ static void on_connect(struct mosquitto *mosq, void *obj, int rc)
 
 	if (rc) {
 		connected_to_mqtt_server = false;
-		fprintf(stderr, "%s: Connect error: %d\n",
+		LOG(LOG_INFO, "%s: Connect error: %d\n",
 			 __func__, rc);
 		return;
 	}
 
 	connected_to_mqtt_server = true;
-	fprintf(stderr, "Successfully connected to broker!\n");
+	LOG(LOG_INFO, "Successfully connected to broker!\n");
 
 	if (server_mode) {
 		snprintf(topic,
@@ -860,7 +854,7 @@ static void on_connect(struct mosquitto *mosq, void *obj, int rc)
 					  topic,
 					  mqtt_qos);
 		if (ret) {
-			fprintf(stderr, "%s: mosquitto_subscribe %d (failed to subscribe to topic %s)\n",
+			LOG(LOG_INFO, "%s: mosquitto_subscribe %d (failed to subscribe to topic %s)\n",
 				__func__, ret, topic);
 
 		}
@@ -875,7 +869,7 @@ static void on_connect(struct mosquitto *mosq, void *obj, int rc)
 					  topic,
 					  mqtt_qos);
 		if (ret) {
-			fprintf(stderr, "%s: mosquitto_subscribe %d (failed to subscribe to topic %s)\n",
+			LOG(LOG_INFO, "%s: mosquitto_subscribe %d (failed to subscribe to topic %s)\n",
 				__func__, ret, topic);
 
 		}
@@ -887,7 +881,7 @@ static void on_disconnect(struct mosquitto *mosq, void *obj, int rc)
 	(void)mosq;
 	(void)obj;
 	connected_to_mqtt_server = false;
-	fprintf(stderr, "%s: Disconnected from broker. reason %d\n",
+	LOG(LOG_INFO, "%s: Disconnected from broker. reason %d\n",
 		  __func__, rc);
 }
 
@@ -912,7 +906,7 @@ int mqtt_forward_init(void)
 				  &addrhint,
 				  &hostaddrinfo);
 		if (ret) {
-			fprintf(stderr, "%s: getaddrinfo returned %d\n", __func__, ret);
+			LOG(LOG_INFO, "%s: getaddrinfo returned %d\n", __func__, ret);
 			goto err;
 		}
 
@@ -928,27 +922,27 @@ int mqtt_forward_init(void)
 			   (struct sockaddr *) &tcp_listen_addr,
 			   sizeof(tcp_listen_addr));
 		if (ret) {
-			fprintf(stderr, "Unable to bind port %d. bind errno: %d\n",
+			LOG(LOG_INFO, "Unable to bind port %d. bind errno: %d\n",
 				tcp_client_listen_port, errno);
 			goto err;
 		}
 
 		ret = listen(tcp_client_listen_sock, 128);
 		if (ret) {
-			fprintf(stderr, "TCP listen errno: %d\n", errno);
+			LOG(LOG_INFO, "TCP listen errno: %d\n", errno);
 			goto err;
 		}
 	}
 
 	ret = mosquitto_lib_init();
 	if (ret) {
-		fprintf(stderr, "%s: mosquitto_lib_init %d\n", __func__, ret);
+		LOG(LOG_INFO, "%s: mosquitto_lib_init %d\n", __func__, ret);
 		goto err;
 	}
 
 	g_mqtt_client = mosquitto_new(client_id, true, NULL);
 	if (!g_mqtt_client) {
-		fprintf(stderr, "%s: mosquitto_new failed\n", __func__);
+		LOG(LOG_INFO, "%s: mosquitto_new failed\n", __func__);
 		goto err;
 	}
 
@@ -960,7 +954,7 @@ int mqtt_forward_init(void)
 					mqtt_private_key,
 					NULL);
 		if (ret) {
-			fprintf(stderr, "%s: mosquitto_tls_set %d\n", __func__, ret);
+			LOG(LOG_INFO, "%s: mosquitto_tls_set %d\n", __func__, ret);
 			goto err;
 		}
 	}
@@ -977,7 +971,7 @@ int mqtt_forward_init(void)
 
 	ret = mosquitto_loop_start(g_mqtt_client);
 	if (ret != MOSQ_ERR_SUCCESS) {
-		fprintf(stderr, "%s: mosquitto_loop_start %d\n", __func__, ret);
+		LOG(LOG_INFO, "%s: mosquitto_loop_start %d\n", __func__, ret);
 		goto err;
 	}
 
@@ -995,7 +989,7 @@ int mqtt_forward_start(void)
 			     &create_thread_fn,
 			     NULL);
 	if (ret) {
-		fprintf(stderr, "%s: pthread_create %d\n", __func__, errno);
+		LOG(LOG_INFO, "%s: pthread_create %d\n", __func__, errno);
 		goto err;
 	}
 
@@ -1005,7 +999,7 @@ int mqtt_forward_start(void)
 				     &tcp_accept_thread_fn,
 				     NULL);
 		if (ret) {
-			fprintf(stderr, "%s: TCP accept: pthread_create %d\n", __func__, errno);
+			LOG(LOG_INFO, "%s: TCP accept: pthread_create %d\n", __func__, errno);
 			goto err;
 		}
 	} else if (!server_mode && list_servers) {
@@ -1014,7 +1008,7 @@ int mqtt_forward_start(void)
 				     &beacon_print_thread_fn,
 				     NULL);
 		if (ret) {
-			fprintf(stderr, "%s: Server print thread: pthread_create %d\n", __func__, errno);
+			LOG(LOG_INFO, "%s: Server print thread: pthread_create %d\n", __func__, errno);
 			goto err;
 		}
 	} else if (server_mode && transmit_beacons) {
@@ -1023,7 +1017,7 @@ int mqtt_forward_start(void)
 				     &beacon_tx_thread_fn,
 				     NULL);
 		if (ret) {
-			fprintf(stderr, "%s: Beacon: pthread_create %d\n", __func__, errno);
+			LOG(LOG_INFO, "%s: Beacon: pthread_create %d\n", __func__, errno);
 			goto err;
 		}
 
@@ -1046,53 +1040,53 @@ void mqtt_forward_wait(void)
 
 static void print_usage(char *prog_name)
 {
-	fprintf(stderr, "Usage:\n");
-	fprintf(stderr, "%s [-d] [-t] [-s] [-p tcp_port] [--client-id client_id] [--mqtt-port mqtt_port] [--mqtt-root-ca root_ca] [--mqtt-certificate cert] [--mqtt-private-key private_key] --mqtt-host mqtt_host --server-side-id server_side_id\n", prog_name);
-	fprintf(stderr, "\n");
+	LOG(LOG_INFO, "Usage:\n");
+	LOG(LOG_INFO, "%s [-d] [-t] [-s] [-p tcp_port] [--client-id client_id] [--mqtt-port mqtt_port] [--mqtt-root-ca root_ca] [--mqtt-certificate cert] [--mqtt-private-key private_key] --mqtt-host mqtt_host --server-side-id server_side_id\n", prog_name);
+	LOG(LOG_INFO, "\n");
 
-	fprintf(stderr, "Some options can be set with environment variables:\n");
-	fprintf(stderr, "  MQTT_FORWARD_MQTT_HOST       See option --mqtt-host\n");
-	fprintf(stderr, "  MQTT_FORWARD_ROOT_CA         See option --mqtt-root-ca\n");
-	fprintf(stderr, "  MQTT_FORWARD_CERTIFICATE     See option --mqtt-certificate\n");
-	fprintf(stderr, "  MQTT_FORWARD_PRIVATE_KEY     See option --mqtt-private-key\n");
-	fprintf(stderr, "  MQTT_FORWARD_REMOTE_IP       See option --remote-ip\n");
-	fprintf(stderr, "  MQTT_FORWARD_REMOTE_PORT     See option --remote-port\n");
-	fprintf(stderr, "  MQTT_FORWARD_SERVER_ID       See option --server-side-id\n");
-	fprintf(stderr, "Note: Environment variables will be overridden by command-line options.\n");
-	fprintf(stderr, "\n");
+	LOG(LOG_INFO, "Some options can be set with environment variables:\n");
+	LOG(LOG_INFO, "  MQTT_FORWARD_MQTT_HOST       See option --mqtt-host\n");
+	LOG(LOG_INFO, "  MQTT_FORWARD_ROOT_CA         See option --mqtt-root-ca\n");
+	LOG(LOG_INFO, "  MQTT_FORWARD_CERTIFICATE     See option --mqtt-certificate\n");
+	LOG(LOG_INFO, "  MQTT_FORWARD_PRIVATE_KEY     See option --mqtt-private-key\n");
+	LOG(LOG_INFO, "  MQTT_FORWARD_REMOTE_IP       See option --remote-ip\n");
+	LOG(LOG_INFO, "  MQTT_FORWARD_REMOTE_PORT     See option --remote-port\n");
+	LOG(LOG_INFO, "  MQTT_FORWARD_SERVER_ID       See option --server-side-id\n");
+	LOG(LOG_INFO, "Note: Environment variables will be overridden by command-line options.\n");
+	LOG(LOG_INFO, "\n");
 
-	fprintf(stderr, "Optional arguments:\n");
-	fprintf(stderr, "  --debug | -d                 Enable debug prints\n");
-	fprintf(stderr, "  --tls | -t                   Use MQTT over TLS\n");
-	fprintf(stderr, "  --server | -s                Run program on TCP server side\n");
-	fprintf(stderr, "                               If not set, program is assumed to run on TCP client side\n");
-	fprintf(stderr, "  --port | -p tcp_port         TCP port to forward (client or server port)\n");
-	fprintf(stderr, "                               Defaults to 22 if not set\n");
-	fprintf(stderr, "                               In server mode (-s): port to connect to on the server\n");
-	fprintf(stderr, "                               In client mode: local port to listen on\n");
-	fprintf(stderr, "  --remote-port port           Remote TCP port (client mode only)\n");
-	fprintf(stderr, "                               Overrides the server's --port setting\n");
-	fprintf(stderr, "  --addr | -a address          Address of TCP server (server mode only)\n");
-	fprintf(stderr, "                               Defaults to 127.0.0.1 if not set\n");
-	fprintf(stderr, "  --remote-ip ip_address       Remote server IP (client mode only)\n");
-	fprintf(stderr, "                               Overrides the server's --addr setting\n");
-	fprintf(stderr, "  --client-id id               MQTT client ID (client mode only)\n");
-	fprintf(stderr, "                               If not set, a random client ID will be generated\n");
-	fprintf(stderr, "  --mqtt-port port             Port for MQTT broker\n");
-	fprintf(stderr, "                               Defaults: 1883 (non-TLS), 8883 (TLS)\n");
-	fprintf(stderr, "  --mqtt-root-ca path          Root CA for MQTT broker (TLS only)\n");
-	fprintf(stderr, "  --mqtt-certificate path      Client certificate for MQTT authentication (TLS only)\n");
-	fprintf(stderr, "  --mqtt-private-key path      Private key for MQTT authentication (TLS only)\n");
-	fprintf(stderr, "  --mqtt-topic-prefix prefix   MQTT topic prefix (default: \"ssh\")\n");
-	fprintf(stderr, "  --mqtt-qos qos_level         QoS level for MQTT (default: 1)\n");
-	fprintf(stderr, "  --beacon | -b                Transmit beacon frames continuously (server mode only)\n");
-	fprintf(stderr, "  --list-server | -l           List available servers (client mode only)\n");
-	fprintf(stderr, "\n");
+	LOG(LOG_INFO, "Optional arguments:\n");
+	LOG(LOG_INFO, "  --debug | -d                 Enable debug prints\n");
+	LOG(LOG_INFO, "  --tls | -t                   Use MQTT over TLS\n");
+	LOG(LOG_INFO, "  --server | -s                Run program on TCP server side\n");
+	LOG(LOG_INFO, "                               If not set, program is assumed to run on TCP client side\n");
+	LOG(LOG_INFO, "  --port | -p tcp_port         TCP port to forward (client or server port)\n");
+	LOG(LOG_INFO, "                               Defaults to 22 if not set\n");
+	LOG(LOG_INFO, "                               In server mode (-s): port to connect to on the server\n");
+	LOG(LOG_INFO, "                               In client mode: local port to listen on\n");
+	LOG(LOG_INFO, "  --remote-port port           Remote TCP port (client mode only)\n");
+	LOG(LOG_INFO, "                               Overrides the server's --port setting\n");
+	LOG(LOG_INFO, "  --addr | -a address          Address of TCP server (server mode only)\n");
+	LOG(LOG_INFO, "                               Defaults to 127.0.0.1 if not set\n");
+	LOG(LOG_INFO, "  --remote-ip ip_address       Remote server IP (client mode only)\n");
+	LOG(LOG_INFO, "                               Overrides the server's --addr setting\n");
+	LOG(LOG_INFO, "  --client-id id               MQTT client ID (client mode only)\n");
+	LOG(LOG_INFO, "                               If not set, a random client ID will be generated\n");
+	LOG(LOG_INFO, "  --mqtt-port port             Port for MQTT broker\n");
+	LOG(LOG_INFO, "                               Defaults: 1883 (non-TLS), 8883 (TLS)\n");
+	LOG(LOG_INFO, "  --mqtt-root-ca path          Root CA for MQTT broker (TLS only)\n");
+	LOG(LOG_INFO, "  --mqtt-certificate path      Client certificate for MQTT authentication (TLS only)\n");
+	LOG(LOG_INFO, "  --mqtt-private-key path      Private key for MQTT authentication (TLS only)\n");
+	LOG(LOG_INFO, "  --mqtt-topic-prefix prefix   MQTT topic prefix (default: \"ssh\")\n");
+	LOG(LOG_INFO, "  --mqtt-qos qos_level         QoS level for MQTT (default: 1)\n");
+	LOG(LOG_INFO, "  --beacon | -b                Transmit beacon frames continuously (server mode only)\n");
+	LOG(LOG_INFO, "  --list-server | -l           List available servers (client mode only)\n");
+	LOG(LOG_INFO, "\n");
 
-	fprintf(stderr, "Mandatory arguments:\n");
-	fprintf(stderr, "  --mqtt-host hostname         Hostname of the MQTT broker\n");
-	fprintf(stderr, "  --server-side-id id          Unique ID for the server-side program\n");
-	fprintf(stderr, "                               Must match on both client and server for connection\n");
+	LOG(LOG_INFO, "Mandatory arguments:\n");
+	LOG(LOG_INFO, "  --mqtt-host hostname         Hostname of the MQTT broker\n");
+	LOG(LOG_INFO, "  --server-side-id id          Unique ID for the server-side program\n");
+	LOG(LOG_INFO, "                               Must match on both client and server for connection\n");
 }
 
 int main(int argc, char **argv)
@@ -1184,7 +1178,7 @@ int main(int argc, char **argv)
 	while ((c = getopt_long(argc, argv, "hdtslba:p:", long_options, &option_index)) != -1) {
 		switch (c) {
 		case 'd':
-			debug = true;
+			mqtt_forward_set_log_level(LOG_DEBUG);
 			break;
 		case 't':
 			use_tls = true;
@@ -1257,59 +1251,59 @@ int main(int argc, char **argv)
 	}
 
 	if (!server_id_set && (server_mode || !list_servers)) {
-		fprintf(stderr, "Missing server ID\n");
+		LOG(LOG_INFO, "Missing server ID\n");
 		return -1;
 	}
 
 	if (!server_mode && !client_id_set) {
 		gen_client_id(client_mqtt_id, sizeof(client_mqtt_id));
-		fprintf(stderr, "Missing client ID. Using random ID: %s\n", client_mqtt_id);
+		LOG(LOG_INFO, "Missing client ID. Using random ID: %s\n", client_mqtt_id);
 	}
 
 	if (!tcp_port_set && !list_servers)
-		fprintf(stderr, "Missing TCP port. Using default port %d\n", port);
+		LOG(LOG_INFO, "Missing TCP port. Using default port %d\n", port);
 
 	if (!mqtt_port_set) {
 		mqtt_port = use_tls ? 8883 : 1883;
-		fprintf(stderr, "Missing MQTT port. Using default port %d\n", mqtt_port);
+		LOG(LOG_INFO, "Missing MQTT port. Using default port %d\n", mqtt_port);
 	}
 
 	if (server_mode && !tcp_server_addr_set) {
 		strncpy(tcp_server_addr_str, "127.0.0.1", sizeof(tcp_server_addr_str));
-		fprintf(stderr, "Missing server address. Using default addr %s\n", tcp_server_addr_str);
+		LOG(LOG_INFO, "Missing server address. Using default addr %s\n", tcp_server_addr_str);
 	}
 
 	if (!mqtt_qos_set)
-		fprintf(stderr, "Missing MQTT QoS. Using default QoS %d\n", mqtt_qos);
+		LOG(LOG_INFO, "Missing MQTT QoS. Using default QoS %d\n", mqtt_qos);
 
 	if (!mqtt_host_set) {
-		fprintf(stderr, "Missing MQTT host\n");
+		LOG(LOG_INFO, "Missing MQTT host\n");
 		return -1;
 	}
 
 	if (use_tls && !mqtt_root_ca_set) {
-		fprintf(stderr, "Missing MQTT root ca\n");
+		LOG(LOG_INFO, "Missing MQTT root ca\n");
 		return -1;
 	}
 
 	if (use_tls && !mqtt_certificate_set) {
-		fprintf(stderr, "Missing MQTT certificate\n");
+		LOG(LOG_INFO, "Missing MQTT certificate\n");
 		return -1;
 	}
 
 	if (use_tls && !mqtt_private_key_set) {
-		fprintf(stderr, "Missing MQTT private key\n");
+		LOG(LOG_INFO, "Missing MQTT private key\n");
 		return -1;
 	}
 
 	if (remote_tcp_server_addr_set && server_mode) {
-		fprintf(stderr, "Remote TCP IP addr set but it is not applicable in server mode\n");
+		LOG(LOG_INFO, "Remote TCP IP addr set but it is not applicable in server mode\n");
 	} else if (remote_tcp_server_addr_set) {
 		struct in_addr in_addr;
 
 		ret = inet_aton(remote_tcp_server_addr_str, &in_addr);
 		if (ret == 0) {
-			fprintf(stderr, "Invalid remote IP addr: %s\n",
+			LOG(LOG_INFO, "Invalid remote IP addr: %s\n",
 				remote_tcp_server_addr_str);
 			return -1;
 		}
@@ -1317,7 +1311,7 @@ int main(int argc, char **argv)
 	}
 
 	if (remote_tcp_port_set && server_mode)
-		fprintf(stderr, "Remote TCP port set but it is not applicable in server mode\n");
+		LOG(LOG_INFO, "Remote TCP port set but it is not applicable in server mode\n");
 
 	if (server_mode)
 		tcp_server_connect_port = port;

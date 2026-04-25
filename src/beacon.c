@@ -1,4 +1,5 @@
 #include "beacon.h"
+#include "log.h"
 #include "session.h"
 #include "utils.h"
 #include <pthread.h>
@@ -49,7 +50,7 @@ void beacon_add_server_to_list(const char *recvd_client_id,
 	pthread_mutex_unlock(&server_list_mtx);
 
 	if (server_nbr >= MAX_SERVER_LIST)
-		fprintf(stderr, "Server list exhausted!\n");
+		LOG(LOG_INFO, "Server list exhausted!\n");
 }
 
 void beacon_print_server_list(void)
@@ -61,17 +62,17 @@ void beacon_print_server_list(void)
 	cur_time = time(NULL);
 
 	/* Print the server list */
-	printf("Detected servers:\n\n");
-	printf("  %40s%30s\n\n", "Server ID", "Last seen (seconds ago)");
+	LOG(LOG_INFO, "Detected servers:\n\n");
+	LOG(LOG_INFO, "  %40s%30s\n\n", "Server ID", "Last seen (seconds ago)");
 
 	for (server_nbr = 0; server_nbr < MAX_SERVER_LIST; server_nbr++) {
 		if (!server_list[server_nbr].server_id)
 			break;
 
-		printf("  %40s%30ld\n",
+		LOG(LOG_INFO, "  %40s%30ld\n",
 		       server_list[server_nbr].server_id,
 		       cur_time - server_list[server_nbr].last_seen_time);
 	}
-	printf("\n\n");
+	LOG(LOG_INFO, "\n\n");
 	pthread_mutex_unlock(&server_list_mtx);
 }

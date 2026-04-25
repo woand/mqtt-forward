@@ -1,4 +1,5 @@
 #include "session.h"
+#include "log.h"
 #include "utils.h"
 #include <string.h>
 #include <errno.h>
@@ -48,7 +49,7 @@ static int connect_server_session(const struct tcp_session_config *session_cfg,
 	/* Create TCP socket and connect to the server*/
 	*tcp_sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (*tcp_sock < 0) {
-		fprintf(stderr, "%s: Unable to create TCP socket. errno %d\n",
+		LOG(LOG_INFO, "%s: Unable to create TCP socket. errno %d\n",
 			__func__, errno);
 		return -1;
 	}
@@ -64,7 +65,7 @@ static int connect_server_session(const struct tcp_session_config *session_cfg,
 		      (const struct sockaddr *) &server_addr,
 		      sizeof(server_addr));
 	if (ret) {
-		fprintf(stderr, "%s: Unable to establish TCP connection. errno %d\n",
+		LOG(LOG_INFO, "%s: Unable to establish TCP connection. errno %d\n",
 			__func__, errno);
 		close(*tcp_sock);
 		*tcp_sock = -1;
@@ -118,7 +119,7 @@ void clear_session(struct tcp_session *session_data)
 		return;
 	}
 
-	fprintf(stderr, "%s: TCP session %s terminated\n",
+	LOG(LOG_INFO, "%s: TCP session %s terminated\n",
 		__func__, session_data->session_id);
 
 	/* Store the session ID of the cleared session in the old session id
@@ -161,7 +162,7 @@ int create_session(const char *session_id,
 	}
 
 	if (session_nbr_local >= MAX_SESSIONS) {
-		fprintf(stderr, "%s: No empty session slot found for new session\n",
+		LOG(LOG_INFO, "%s: No empty session slot found for new session\n",
 			 __func__);
 		return -1;
 	}
@@ -206,13 +207,13 @@ int create_session(const char *session_id,
 					  topic,
 					  mqtt_qos);
 		if (ret) {
-			fprintf(stderr, "%s: mosquitto_subscribe %d (failed to subscribe to topic %s)\n",
+			LOG(LOG_INFO, "%s: mosquitto_subscribe %d (failed to subscribe to topic %s)\n",
 				__func__, ret, topic);
 			free(session_id_local);
 			return -1;
 
 		}
-		fprintf(stderr, "%s: subscribed to %s\n", __func__, topic);
+		LOG(LOG_INFO, "%s: subscribed to %s\n", __func__, topic);
 	}
 
 	/* Create a session struct for the session*/
@@ -250,7 +251,7 @@ int create_session(const char *session_id,
 			 server_mqtt_id,
 			 session_id_local);
 
-	fprintf(stderr, "%s: Creating session thread for session %s, session number %lu\n",
+	LOG(LOG_INFO, "%s: Creating session thread for session %s, session number %lu\n",
 		 __func__,
 		 tcp_sessions[session_nbr_local].session_id,
 		 session_nbr_local);
@@ -259,7 +260,7 @@ int create_session(const char *session_id,
 			     thread_fn,
 			     &tcp_sessions[session_nbr_local]);
 	if (ret) {
-		fprintf(stderr, "%s: pthread_create %d\n", __func__, errno);
+		LOG(LOG_INFO, "%s: pthread_create %d\n", __func__, errno);
 		free(tcp_sessions[session_nbr_local].rx_buf);
 		free(tcp_sessions[session_nbr_local].publish_topic);
 		free(session_id_local);

@@ -1,4 +1,5 @@
 #include "protocol.h"
+#include "log.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -26,7 +27,7 @@ int create_config_header(const struct tcp_session_config *session_cfg,
 	/* Allocate and populate config header */
 	hdr_buf = calloc(hdr_size, 1);
 	if (!hdr_buf) {
-		fprintf(stderr, "%s: Unable to allocate header buf\n",
+		LOG(LOG_INFO, "%s: Unable to allocate header buf\n",
 			__func__);
 		return -1;
 	}
@@ -59,5 +60,4 @@ int create_config_header(const struct tcp_session_config *session_cfg,
 
 	return 0;
 }
-
 

@@ -14,6 +14,7 @@ set(TARGET_MQTT_FORWARD mqtt-forward)
 
 set(source_files_mqtt_forward
     src/beacon.c
+    src/log.c
     src/mqtt-forward.c
     src/protocol.c
     src/session.c
@@ -50,6 +51,7 @@ if(BUILD_TESTING)
 
   add_executable(${TARGET_UNIT_TESTS}
       src/beacon.c
+      src/log.c
       src/protocol.c
       src/session.c
       src/utils.c
