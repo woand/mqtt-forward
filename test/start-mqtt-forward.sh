@@ -4,6 +4,7 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
 SECURE=1
 SERVER_SIDE=0
+PORT_OVERRIDE=""
 
 while [[ "$#" -gt 0 ]]; do
 	case "$1" in
@@ -14,6 +15,10 @@ while [[ "$#" -gt 0 ]]; do
 		-s|--server-side)
 			SERVER_SIDE=1
 			shift
+			;;
+		-p|--port)
+			PORT_OVERRIDE="$2"
+			shift 2
 			;;
 		*)
 			echo "Unknown option: $1"
@@ -35,6 +40,10 @@ else
 	PRIVATE_KEY="${SCRIPT_DIR}"/mosquitto/mosquitto-certs/clients/client-side/client-side.key
 	PORT=1230
 	SERVER_SIDE_ARGS=""
+fi
+
+if [[ -n "${PORT_OVERRIDE}" ]] ; then
+	PORT="${PORT_OVERRIDE}"
 fi
 
 if [[ ! -f "${MQTT_FORWARD}" ]] ; then

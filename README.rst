@@ -252,7 +252,8 @@ With the unsecure setup, all TLS security have been disabled and the broker will
 The test scripts and Docker Compose file can also be used as an example of how to setup mqtt-forward together with the mosquitto mqtt broker.
 
 The test framework is comprised of one mosquitto instance running in a docker container and two instances of mqtt-forward.
-The mqtt-forward instances are setup for SSH forwarding. Both instances will connect to the same broker.
+The mqtt-forward instances can be used either for manual SSH forwarding checks or for an automated echo based integration test.
+Both instances will connect to the same broker.
 
 Make sure the tool is built prior to running the tests!
 
@@ -281,3 +282,22 @@ Use the ssh client to test the forwarding::
 To stop the mosquitto docker image and the mqtt-forward instances, run::
 
     ./test/teardown.sh
+
+Automated multi-client echo test
+++++++++++++++++++++++++++++++++
+
+There is also an automated integration test that verifies that multiple client side TCP connections can be active at the same time.
+
+The test starts:
+
+* the mosquitto broker in Docker
+* one server side mqtt-forward instance
+* one client side mqtt-forward instance
+* a local echo service on port 12391
+* multiple simultaneous TCP clients that connect to port 12390, send unique payloads and verify that the same payload is echoed back
+
+Run it like this::
+
+    ./test/run-multi-client-echo-test.sh
+
+The script also accepts ``-u|--unsecure`` to use the unsecure broker setup and ``-n|--clients`` to change the number of simultaneous clients.

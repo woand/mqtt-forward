@@ -46,6 +46,7 @@ install(TARGETS ${TARGET_MQTT_FORWARD} DESTINATION bin)
 
 if(BUILD_TESTING)
   set(TARGET_UNIT_TESTS mqtt-forward-unit-tests)
+  set(TARGET_TEST_HELPER mqtt-forward-test-helper)
 
   add_executable(${TARGET_UNIT_TESTS}
       src/beacon.c
@@ -67,6 +68,16 @@ if(BUILD_TESTING)
       mosquitto
       OpenSSL::SSL
       OpenSSL::Crypto
+  )
+
+  add_executable(${TARGET_TEST_HELPER}
+      test/mqtt_forward_test_helper.c
+  )
+
+  target_compile_options(${TARGET_TEST_HELPER} PRIVATE -Wall)
+
+  target_link_libraries(${TARGET_TEST_HELPER} PRIVATE
+      pthread
   )
 
   add_test(NAME unit COMMAND ${TARGET_UNIT_TESTS})
