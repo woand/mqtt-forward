@@ -46,7 +46,6 @@ static pthread_t beacon_tx_thread;
 static pthread_t mqtt_create_thread;
 static struct mosquitto *g_mqtt_client;
 static bool connected_to_mqtt_server;
-static bool server_mode;
 static bool list_servers;
 static bool transmit_beacons;
 static struct sockaddr_in *tcp_server_addr;

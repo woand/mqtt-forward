@@ -1,7 +1,10 @@
 #ifndef MQTT_FORWARD_LOG_H
 #define MQTT_FORWARD_LOG_H
 
+#include <stdbool.h>
 #include <syslog.h>
+
+extern bool server_mode;
 
 void mqtt_forward_set_log_level(int level);
 int mqtt_forward_get_log_level(void);
