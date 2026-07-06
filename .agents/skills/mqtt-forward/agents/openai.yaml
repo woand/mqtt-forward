@@ -1,0 +1,4 @@
+interface:
+  display_name: "MQTT Forward"
+  short_description: "Work effectively in the mqtt-forward repo"
+  default_prompt: "Use $mqtt-forward to inspect, explain, modify, or test the MQTT-over-TCP tunnel project."
