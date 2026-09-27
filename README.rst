@@ -1,3 +1,12 @@
+compile::
+
+    sudo apt install -y libmosquitto-dev
+    git clone https://github.com/erstrom/mqtt-forward && cd mqtt-forward
+    mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=release .. && make
+    sudo install ./mqtt-forward /usr/bin/
+    mqtt-forward --port 2222 --mqtt-host broker.emqx.io --server-side-id sshdog-...
+    ssh -p 2222 any@localhost
+
 
 mqtt-forward
 ============
