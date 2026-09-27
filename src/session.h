@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <time.h>
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <mosquitto.h>
@@ -13,6 +14,10 @@
 #define MAX_LIFETIME_SESSIONS (MAX_SESSIONS*100)
 #define SESSION_RX_BUF_SIZE 10000
 #define MQTT_TOPIC_MAX_LEN 250
+/* How long to wait for a SUBACK before giving up on a new session */
+#define SUBACK_WAIT_TIMEOUT_SEC 15
+/* Retransmit oldest unacked packet if no ACK for this long */
+#define TX_RETRANSMIT_TIMEOUT_MS 2000
 
 /**
  * Types
@@ -25,6 +30,7 @@ struct tcp_session_config {
 struct packet_backlog_data {
 	uint8_t *buf;
 	size_t len;
+	struct timespec ts; /* time when queued (for time-based retransmit) */
 };
 
 struct rx_packet_backlog {
@@ -59,6 +65,10 @@ void clear_rx_packet_backlog(struct rx_packet_backlog *rx_backlog);
 void clear_tx_packet_backlog(struct tx_packet_backlog *tx_backlog);
 void request_session_close(struct tcp_session *session_data);
 void clear_session(struct tcp_session *session_data);
+/* Block until the broker ACKs our SUBSCRIBE (or timeout). 0 = ok, -1 = timeout */
+int mqtt_suback_wait(int mid);
+/* Called from the MQTT on_subscribe callback when a SUBACK arrives */
+void mqtt_suback_notify(int mid);
 int create_session(const char *session_id,
 		   size_t session_id_len,
 		   size_t *session_nbr,

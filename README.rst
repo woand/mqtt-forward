@@ -4,6 +4,26 @@ mqtt-forward
 
 Tool used to forward TCP traffic (typically SSH) over MQTT.
 
+Reliability fixes (this fork)
+-----------------------------
+
+On top of upstream erstrom/mqtt-forward, this fork fixes several reliability
+issues that could stall an SSH handshake over a public MQTT broker:
+
+- Client side waits for the MQTT SUBACK of its ``rx`` topic subscription
+  before starting to forward, so the first reply packets from the server side
+  are not dropped by the broker.
+- Unacknowledged packets are retransmitted when the oldest one has been
+  waiting for more than 2 seconds (previously retransmission only triggered
+  when the unacknowledged window exceeded 100 packets, so a single lost
+  packet could stall the session forever).
+- ``mosquitto_publish`` returning ``MOSQ_ERR_NO_CONN`` no longer tears down
+  the TCP session; queued data is kept and sent after reconnect.
+- Client side re-subscribes its active sessions after an MQTT reconnect
+  (it uses a clean session, so subscriptions do not survive a reconnect).
+
+See ``src/mqtt-forward.c``, ``src/session.c`` and ``src/session.h``.
+
 The tool has been developed with SSH in mind, but any TCP connection can be forwarded.
 
 Below picture shows how the tool is supposed to be used:

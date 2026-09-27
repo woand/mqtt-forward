@@ -18,6 +18,73 @@ pthread_mutex_t session_mtx = PTHREAD_MUTEX_INITIALIZER;
 char *old_session_ids[MAX_LIFETIME_SESSIONS];
 size_t num_old_sessions;
 
+/*
+ * SUBACK tracking. A client must not publish the first packet of a session
+ * before the broker has acknowledged its subscription, otherwise the
+ * server's first reply is silently dropped and the session stalls forever.
+ */
+static pthread_mutex_t suback_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t suback_cond = PTHREAD_COND_INITIALIZER;
+static int suback_pending_mids[MAX_SESSIONS];
+static int num_pending_subacks;
+
+int mqtt_suback_wait(int mid)
+{
+	struct timespec ts;
+	int i;
+	int found;
+	int rc = 0;
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += SUBACK_WAIT_TIMEOUT_SEC;
+
+	pthread_mutex_lock(&suback_mtx);
+	if (num_pending_subacks < MAX_SESSIONS)
+		suback_pending_mids[num_pending_subacks++] = mid;
+	for (;;) {
+		found = 0;
+		for (i = 0; i < num_pending_subacks; i++) {
+			if (suback_pending_mids[i] == mid) {
+				found = 1;
+				break;
+			}
+		}
+		if (!found)
+			break;
+		if (pthread_cond_timedwait(&suback_cond, &suback_mtx, &ts) == ETIMEDOUT) {
+			for (i = 0; i < num_pending_subacks; i++) {
+				if (suback_pending_mids[i] == mid) {
+					suback_pending_mids[i] =
+						suback_pending_mids[--num_pending_subacks];
+					break;
+				}
+			}
+			LOG(LOG_INFO, "Timed out waiting for SUBACK (mid %d)\n", mid);
+			rc = -1;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&suback_mtx);
+
+	return rc;
+}
+
+void mqtt_suback_notify(int mid)
+{
+	int i;
+
+	pthread_mutex_lock(&suback_mtx);
+	for (i = 0; i < num_pending_subacks; i++) {
+		if (suback_pending_mids[i] == mid) {
+			suback_pending_mids[i] =
+				suback_pending_mids[--num_pending_subacks];
+			pthread_cond_broadcast(&suback_cond);
+			break;
+		}
+	}
+	pthread_mutex_unlock(&suback_mtx);
+}
+
 static pthread_t tcp_rx_threads[MAX_SESSIONS];
 
 static void store_old_session_id(char *session_id)
@@ -214,6 +281,16 @@ int create_session(const char *session_id,
 
 		}
 		LOG(LOG_INFO, "%s: subscribed to %s\n", __func__, topic);
+		/* Wait for the SUBACK: publishing our first packet before the
+		 * broker has registered this subscription would silently drop
+		 * the server's first reply and stall the session forever.
+		 */
+		if (mqtt_suback_wait(mid)) {
+			LOG(LOG_INFO, "%s: SUBACK timeout for topic %s\n",
+				__func__, topic);
+			free(session_id_local);
+			return -1;
+		}
 	}
 
 	/* Create a session struct for the session*/

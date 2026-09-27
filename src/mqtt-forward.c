@@ -175,6 +175,9 @@ static void *tcp_session_rx_thread_fn(void *arg)
 						tx_backlog->backlog[tx_backlog->first_unacked_idx].buf,
 						mqtt_qos,
 						false /*retain*/);
+			if (ret == MOSQ_ERR_SUCCESS)
+				clock_gettime(CLOCK_MONOTONIC,
+					      &tx_backlog->backlog[tx_backlog->first_unacked_idx].ts);
 			pthread_mutex_unlock(&session_mtx);
 			(void)nanosleep(&sleep_time, NULL);
 		} else {
@@ -223,8 +226,56 @@ static void *tcp_session_rx_thread_fn(void *arg)
 					LOG(LOG_INFO, "Publishing on topic %s failed. Result %d\n",
 						topic,
 						ret);
+					if (ret == MOSQ_ERR_NO_CONN) {
+						/* Not connected: heartbeat skipped,
+						 * try again on next poll timeout.
+						 */
+						continue;
+					}
 					break;
 				}
+				/* Time-based retransmit: if the oldest unacked packet
+				 * has been waiting for an ACK longer than
+				 * TX_RETRANSMIT_TIMEOUT_MS, re-send it. This heals
+				 * a session after any single packet loss; the
+				 * window-full retransmit above alone can not, as it
+				 * only triggers at 100 unacked packets.
+				 */
+				pthread_mutex_lock(&session_mtx);
+				if (!session_data->closing &&
+				    tx_backlog->backlog[tx_backlog->first_unacked_idx].buf) {
+					struct packet_backlog_data *oldest =
+						&tx_backlog->backlog[tx_backlog->first_unacked_idx];
+					struct tcp_over_mqtt_hdr *rhdr =
+						(struct tcp_over_mqtt_hdr *)oldest->buf;
+					struct timespec now;
+					long age_ms;
+
+					clock_gettime(CLOCK_MONOTONIC, &now);
+					age_ms = (now.tv_sec - oldest->ts.tv_sec) * 1000 +
+						 (now.tv_nsec - oldest->ts.tv_nsec) / 1000000;
+					if (age_ms > TX_RETRANSMIT_TIMEOUT_MS) {
+						if (rx_backlog->expected_seq_nbr > 1) {
+							rhdr->flags |= TCP_OVER_MQTT_FLAG_ACKED_SEQ_NBR;
+							rhdr->acked_seq_nbr =
+								rx_backlog->expected_seq_nbr - 1;
+						}
+						LOG(LOG_DEBUG, "Session %s: TX RETRANSMIT (timeout): %4lu. Acked %4lu\n",
+							 session_data->session_id,
+							 rhdr->seq_nbr,
+							 rhdr->acked_seq_nbr);
+						ret = mosquitto_publish(g_mqtt_client,
+									NULL,
+									topic,
+									oldest->len,
+									oldest->buf,
+									mqtt_qos,
+									false /*retain*/);
+						if (ret == MOSQ_ERR_SUCCESS)
+							clock_gettime(CLOCK_MONOTONIC, &oldest->ts);
+					}
+				}
+				pthread_mutex_unlock(&session_mtx);
 				continue;
 			}
 
@@ -278,6 +329,8 @@ static void *tcp_session_rx_thread_fn(void *arg)
 			tx_backlog->backlog[backlog_write_idx].buf = malloc(recv_len);
 			tx_backlog->backlog[backlog_write_idx].len = recv_len;
 			memcpy(tx_backlog->backlog[backlog_write_idx].buf, rx_buf, recv_len);
+			clock_gettime(CLOCK_MONOTONIC,
+				      &tx_backlog->backlog[backlog_write_idx].ts);
 			session_data->tx_seq_nbr++;
 			LOG(LOG_DEBUG, "Session %s: TX: %4lu. Acked %4lu\n",
 				 session_data->session_id,
@@ -296,6 +349,12 @@ static void *tcp_session_rx_thread_fn(void *arg)
 				LOG(LOG_INFO, "Publishing on topic %s failed. Result %d\n",
 					topic,
 					ret);
+				if (ret == MOSQ_ERR_NO_CONN) {
+					/* Not connected: keep the packet queued,
+					 * it will be retransmitted after reconnect.
+					 */
+					continue;
+				}
 				break;
 			}
 		}
@@ -820,6 +879,12 @@ static void on_subscribe(struct mosquitto *mosq,
 			 int qos_count,
 			 const int *granted_qos)
 {
+	(void)mosq;
+	(void)obj;
+	(void)qos_count;
+	(void)granted_qos;
+
+	mqtt_suback_notify(mid);
 }
 
 static void on_connect(struct mosquitto *mosq, void *obj, int rc)
@@ -872,6 +937,38 @@ static void on_connect(struct mosquitto *mosq, void *obj, int rc)
 				__func__, ret, topic);
 
 		}
+	} else {
+		/* Client mode. A reconnect drops all session subscriptions
+		 * (clean session), which would stall every active session.
+		 * Re-subscribe to them here.
+		 */
+		size_t i;
+
+		pthread_mutex_lock(&session_mtx);
+		for (i = 0; i < MAX_SESSIONS; i++) {
+			if (!tcp_sessions[i].session_id ||
+			    tcp_sessions[i].server_session ||
+			    tcp_sessions[i].closing)
+				continue;
+			snprintf(topic,
+				 MQTT_TOPIC_MAX_LEN,
+				 "%s/%s/%s/rx",
+				 mqtt_topic_prefix,
+				 server_mqtt_id,
+				 tcp_sessions[i].session_id);
+			ret = mosquitto_subscribe(g_mqtt_client,
+						  &mid,
+						  topic,
+						  mqtt_qos);
+			if (ret) {
+				LOG(LOG_INFO, "%s: re-subscribe failed (%d) for topic %s\n",
+					__func__, ret, topic);
+			} else {
+				LOG(LOG_INFO, "%s: re-subscribed to %s\n",
+					__func__, topic);
+			}
+		}
+		pthread_mutex_unlock(&session_mtx);
 	}
 }
 
