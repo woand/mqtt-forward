@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <fcntl.h>
@@ -390,6 +391,12 @@ static void *tcp_accept_thread_fn(void *arg)
 			LOG(LOG_INFO, "connect to remote server failed. errno %d\n", errno);
 			close(client_sock);
 			continue;
+		}
+
+		/* Disable Nagle on the accepted socket as well. */
+		{
+			int flag = 1;
+			setsockopt(client_sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 		}
 
 		session_cfg = NULL;
@@ -1040,6 +1047,16 @@ int mqtt_forward_init(void)
 	if (!g_mqtt_client) {
 		LOG(LOG_INFO, "%s: mosquitto_new failed\n", __func__);
 		goto err;
+	}
+
+	/* Disable Nagle's algorithm on the MQTT connection: interactive
+	 * traffic (e.g. SSH keystrokes) consists of tiny packets and
+	 * Nagle would delay each of them up to one delayed-ACK timeout. */
+	{
+		int tcp_nodelay = 1;
+		mosquitto_opts_set(g_mqtt_client,
+				   MOSQ_OPT_TCP_NODELAY,
+				   &tcp_nodelay);
 	}
 
 	if (use_tls) {

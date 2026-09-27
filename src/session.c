@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 
 
@@ -119,6 +120,12 @@ static int connect_server_session(const struct tcp_session_config *session_cfg,
 		LOG(LOG_INFO, "%s: Unable to create TCP socket. errno %d\n",
 			__func__, errno);
 		return -1;
+	}
+
+	/* Disable Nagle: small interactive packets should go out immediately. */
+	{
+		int flag = 1;
+		setsockopt(*tcp_sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 	}
 
 	if (session_cfg) {
